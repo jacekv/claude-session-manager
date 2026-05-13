@@ -4,6 +4,7 @@ class TerminalWrapper {
   private fitAddon: FitAddon.FitAddon;
   private _resizeObserver: ResizeObserver;
   private onInputCallback: ((sessionId: string, data: string) => void) | null = null;
+  private onResizeCallback: ((sessionId: string, cols: number, rows: number) => void) | null = null;
 
   activeSessionId: string | null = null;
 
@@ -88,9 +89,16 @@ class TerminalWrapper {
   fit(): void {
     try {
       this.fitAddon.fit();
+      if (this.onResizeCallback && this.activeSessionId) {
+        this.onResizeCallback(this.activeSessionId, this.terminal.cols, this.terminal.rows);
+      }
     } catch {
       // Container may not be visible yet
     }
+  }
+
+  onResize(callback: (sessionId: string, cols: number, rows: number) => void): void {
+    this.onResizeCallback = callback;
   }
 
   getDimensions(): { cols: number; rows: number } {
