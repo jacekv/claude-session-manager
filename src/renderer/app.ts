@@ -12,6 +12,10 @@ document.addEventListener('DOMContentLoaded', () => {
     window.api.sendInput(sessionId, data);
   });
 
+  terminalWrapper.onResize((sessionId: string, cols: number, rows: number) => {
+    window.api.resizeSession(sessionId, cols, rows);
+  });
+
   async function createNewSession(): Promise<void> {
     const session = await window.api.createSession();
     if (!session) return;
