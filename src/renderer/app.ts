@@ -1,4 +1,4 @@
-let terminalWrapper: TerminalWrapper;
+let paneManager: PaneManager;
 let activeSessionId: string | null = null;
 const sessions = new Map<string, SessionInfo>();
 
@@ -6,14 +6,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const terminalPanel = document.getElementById('terminal-panel')!;
   const emptyState = document.getElementById('empty-state')!;
 
-  terminalWrapper = new TerminalWrapper(terminalPanel);
-
-  terminalWrapper.onInput((sessionId: string, data: string) => {
-    window.api.sendInput(sessionId, data);
-  });
-
-  terminalWrapper.onResize((sessionId: string, cols: number, rows: number) => {
-    window.api.resizeSession(sessionId, cols, rows);
+  paneManager = new PaneManager(terminalPanel, {
+    getBuffer: (sessionId: string) => window.api.getBuffer(sessionId),
+    onInput: (sessionId: string, data: string) => window.api.sendInput(sessionId, data),
+    onResize: (sessionId: string, cols: number, rows: number) => window.api.resizeSession(sessionId, cols, rows),
+    onFocusChange: (sessionId: string) => {
+      activeSessionId = sessionId;
+      window.api.setActiveSession(sessionId);
+      renderSidebar();
+    },
   });
 
   async function createNewSession(): Promise<void> {
@@ -55,9 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   window.api.onOutput((sessionId: string, data: string) => {
-    if (sessionId === activeSessionId) {
-      terminalWrapper.write(data);
-    }
+    paneManager.routeOutput(sessionId, data);
   });
 
   window.api.onStateChange((sessionId: string, state: SessionStatus) => {
@@ -87,20 +86,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function switchToSession(sessionId: string): void {
-    activeSessionId = sessionId;
-    window.api.setActiveSession(sessionId);
-
     terminalPanel.classList.add('visible');
     emptyState.style.display = 'none';
-
-    window.api.getBuffer(sessionId).then((buffer: string) => {
-      terminalWrapper.switchTo(sessionId, buffer);
-
-      const { cols, rows } = terminalWrapper.getDimensions();
-      window.api.resizeSession(sessionId, cols, rows);
-    });
-
-    renderSidebar();
+    // PaneManager focuses (or opens) the pane and fires onFocusChange, which
+    // updates activeSessionId, the active-session IPC, and the sidebar.
+    paneManager.showSession(sessionId);
   }
 
   function startRename(sessionId: string, nameSpan: HTMLSpanElement): void {
@@ -340,10 +330,14 @@ document.addEventListener('DOMContentLoaded', () => {
       removeSidebarEntry(id);
       enforceGroupIntegrity();
 
-      if (activeSessionId === id) {
+      // Remove the killed session from any pane (collapses its split).
+      paneManager.removeSession(id);
+
+      if (paneManager.isEmpty()) {
         activeSessionId = null;
         terminalPanel.classList.remove('visible');
         emptyState.style.display = '';
+        // Open another session in the freed space if any remain.
         const remaining = getVisibleSessionOrder();
         if (remaining.length > 0) switchToSession(remaining[0]);
       }

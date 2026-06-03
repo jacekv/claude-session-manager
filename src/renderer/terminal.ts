@@ -1,3 +1,8 @@
+// One TerminalWrapper owns exactly one xterm instance bound to one session.
+// The PaneManager creates one wrapper per visible pane. Wrappers are NOT
+// responsible for document-level concerns (file drag/drop) — with multiple
+// wrappers those listeners would fire once per instance. The PaneManager owns
+// any document-level handling.
 class TerminalWrapper {
   private container: HTMLElement;
   private terminal: Terminal;
@@ -5,11 +10,13 @@ class TerminalWrapper {
   private _resizeObserver: ResizeObserver;
   private onInputCallback: ((sessionId: string, data: string) => void) | null = null;
   private onResizeCallback: ((sessionId: string, cols: number, rows: number) => void) | null = null;
+  private onFocusCallback: ((sessionId: string) => void) | null = null;
 
-  activeSessionId: string | null = null;
+  readonly sessionId: string;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, sessionId: string) {
     this.container = container;
+    this.sessionId = sessionId;
 
     this.terminal = new Terminal({
       theme: {
@@ -54,43 +61,25 @@ class TerminalWrapper {
     this.fit();
 
     this.terminal.onData((data: string) => {
-      if (this.onInputCallback && this.activeSessionId) {
-        this.onInputCallback(this.activeSessionId, data);
+      if (this.onInputCallback) {
+        this.onInputCallback(this.sessionId, data);
       }
+    });
+
+    // Notify the manager when this pane gains focus (click / keyboard focus).
+    container.addEventListener('focusin', () => {
+      if (this.onFocusCallback) this.onFocusCallback(this.sessionId);
     });
 
     this._resizeObserver = new ResizeObserver(() => this.fit());
     this._resizeObserver.observe(container);
-
-    // File drop: write file paths into the terminal.
-    // Listen on document because xterm.js creates internal layers that swallow events.
-    document.addEventListener('dragover', (e: DragEvent) => {
-      if (e.dataTransfer?.types.includes('Files')) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-      }
-    });
-
-    document.addEventListener('drop', (e: DragEvent) => {
-      e.preventDefault();
-      if (!this.onInputCallback || !this.activeSessionId) return;
-      const files = e.dataTransfer?.files;
-      if (!files || files.length === 0) return;
-
-      const paths = Array.from(files)
-        .map(f => (window as any).api.getPathForFile(f) as string)
-        .filter(Boolean);
-      if (paths.length > 0) {
-        this.onInputCallback(this.activeSessionId, paths.join(' '));
-      }
-    });
   }
 
   fit(): void {
     try {
       this.fitAddon.fit();
-      if (this.onResizeCallback && this.activeSessionId) {
-        this.onResizeCallback(this.activeSessionId, this.terminal.cols, this.terminal.rows);
+      if (this.onResizeCallback) {
+        this.onResizeCallback(this.sessionId, this.terminal.cols, this.terminal.rows);
       }
     } catch {
       // Container may not be visible yet
@@ -101,22 +90,25 @@ class TerminalWrapper {
     this.onResizeCallback = callback;
   }
 
-  getDimensions(): { cols: number; rows: number } {
-    return { cols: this.terminal.cols, rows: this.terminal.rows };
-  }
-
   onInput(callback: (sessionId: string, data: string) => void): void {
     this.onInputCallback = callback;
   }
 
-  switchTo(sessionId: string, buffer: string): void {
-    this.activeSessionId = sessionId;
+  onFocus(callback: (sessionId: string) => void): void {
+    this.onFocusCallback = callback;
+  }
+
+  getDimensions(): { cols: number; rows: number } {
+    return { cols: this.terminal.cols, rows: this.terminal.rows };
+  }
+
+  /** Replay a session's scrollback into this pane (used on initial mount). */
+  load(buffer: string): void {
     this.terminal.clear();
     this.terminal.reset();
     if (buffer) {
       this.terminal.write(buffer);
     }
-    this.terminal.focus();
     this.fit();
   }
 
