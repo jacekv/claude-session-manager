@@ -8,12 +8,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   paneManager = new PaneManager(terminalPanel, {
     getBuffer: (sessionId: string) => window.api.getBuffer(sessionId),
+    getSessionName: (sessionId: string) => sessions.get(sessionId)?.name ?? sessionId,
     onInput: (sessionId: string, data: string) => window.api.sendInput(sessionId, data),
     onResize: (sessionId: string, cols: number, rows: number) => window.api.resizeSession(sessionId, cols, rows),
     onFocusChange: (sessionId: string) => {
       activeSessionId = sessionId;
       window.api.setActiveSession(sessionId);
       renderSidebar();
+    },
+    onLayoutEmpty: () => {
+      activeSessionId = null;
+      terminalPanel.classList.remove('visible');
+      emptyState.style.display = '';
+    },
+    onSplitRequest: async (paneId: string, direction: SplitDirection) => {
+      const session = await window.api.createSession();
+      if (!session) return;
+      sessions.set(session.id, session);
+      sidebarOrder.push({ type: 'session', id: session.id });
+      terminalPanel.classList.add('visible');
+      emptyState.style.display = 'none';
+      paneManager.splitPane(paneId, direction, session.id, false);
+      renderSidebar();
+      scheduleSave();
     },
   });
 
@@ -73,6 +90,24 @@ document.addEventListener('DOMContentLoaded', () => {
       session.status = 'done';
       renderSidebar();
     }
+  });
+
+  window.api.onSplitSession((direction: SplitDirection) => {
+    const focusedId = paneManager.getFocusedSessionId();
+    if (!focusedId) return;
+    const paneId = paneManager.getFocusedPaneId();
+    if (!paneId) return;
+    (async () => {
+      const session = await window.api.createSession();
+      if (!session) return;
+      sessions.set(session.id, session);
+      sidebarOrder.push({ type: 'session', id: session.id });
+      terminalPanel.classList.add('visible');
+      emptyState.style.display = 'none';
+      paneManager.splitPane(paneId, direction, session.id, false);
+      renderSidebar();
+      scheduleSave();
+    })();
   });
 
   window.api.onNavSession((direction: 'next' | 'prev') => {
@@ -349,6 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Drag events
     li.addEventListener('dragstart', (e: DragEvent) => {
       e.dataTransfer!.setData('text/plain', id);
+      e.dataTransfer!.setData('application/x-session-id', id);
       e.dataTransfer!.effectAllowed = 'move';
       dragInProgress = true;
       li.classList.add('dragging');

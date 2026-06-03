@@ -110,6 +110,12 @@ function createWindow(): void {
     if (navModifier && (input.key === 'ArrowUp' || input.key === 'ArrowDown')) {
       win.webContents.send('nav-session', input.key === 'ArrowDown' ? 'next' : 'prev');
     }
+
+    // Cmd+D: split right. Cmd+Shift+D: split down.
+    if ((input.meta || input.control) && input.key === 'd') {
+      const direction = input.shift ? 'horizontal' : 'vertical';
+      win.webContents.send('split-session', direction);
+    }
   });
 
   ipcMain.handle('session:create', async () => {
