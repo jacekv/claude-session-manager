@@ -281,3 +281,17 @@ app.on('window-all-closed', () => {
   if (sessionManager) sessionManager.killAll();
   app.quit();
 });
+
+// SIGINT/SIGTERM (e.g. Ctrl+C in terminal, kill) bypass Electron's quit flow
+// entirely. Route them through the normal window close so the renderer save
+// handshake runs before the process exits.
+function handleSignal() {
+  const win = mainWindow;
+  if (win && !win.isDestroyed()) {
+    win.close(); // triggers win.on('close') → save handshake → win.close() again
+  } else {
+    process.exit(0);
+  }
+}
+process.on('SIGINT', handleSignal);
+process.on('SIGTERM', handleSignal);
