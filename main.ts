@@ -198,8 +198,21 @@ function createWindow(): void {
   // State persistence
   const statePath = path.join(app.getPath('userData'), STATE_FILE);
 
+  // Keep the last state the renderer pushed in memory. On quit we write it
+  // synchronously, avoiding the async IPC round-trip that races with process exit.
+  let lastSavedState: string | null = null;
+
   ipcMain.handle('state:save', (_event: IpcMainInvokeEvent, state: string) => {
+    lastSavedState = state;
     fs.writeFileSync(statePath, state, 'utf-8');
+  });
+
+  app.on('before-quit', () => {
+    // If the renderer's onBeforeQuit save hasn't arrived yet, flush whatever
+    // we last received from scheduleSave to disk right now.
+    if (lastSavedState) {
+      try { fs.writeFileSync(statePath, lastSavedState, 'utf-8'); } catch { /* ignore */ }
+    }
   });
 
   ipcMain.handle('state:load', async () => {
@@ -235,11 +248,6 @@ app.whenReady().then(() => {
   createWindow();
 });
 
-app.on('before-quit', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('app:before-quit');
-  }
-});
 
 app.on('window-all-closed', () => {
   if (sessionManager) sessionManager.killAll();

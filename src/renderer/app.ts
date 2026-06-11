@@ -59,14 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Save state before app quits
-  window.api.onBeforeQuit(() => {
-    if (sessions.size > 0) {
-      window.api.saveState(buildSavedState(paneManager));
-    }
-  });
-
-  document.getElementById('new-session-btn')!.addEventListener('click', createNewSession);
+document.getElementById('new-session-btn')!.addEventListener('click', createNewSession);
   document.getElementById('rename-session-btn')!.addEventListener('click', () => {
     if (!activeSessionId) return;
     const nameSpan = document.querySelector(`#session-list li.active .session-name`) as HTMLSpanElement | null;
