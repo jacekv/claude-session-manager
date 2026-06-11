@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld('api', {
   onNavSession: (callback: (direction: 'next' | 'prev') => void): void => {
     ipcRenderer.on('nav-session', (_, direction) => callback(direction));
   },
+  onSplitSession: (callback: (direction: 'vertical' | 'horizontal') => void): void => {
+    ipcRenderer.on('split-session', (_, direction) => callback(direction));
+  },
 
   openUrl: (url: string): Promise<void> => ipcRenderer.invoke('open-url', url),
   correctState: (id: string, correctState: string): Promise<void> =>
@@ -39,7 +42,10 @@ contextBridge.exposeInMainWorld('api', {
   saveState: (state: string): Promise<void> => ipcRenderer.invoke('state:save', state),
   loadState: (): Promise<string | null> => ipcRenderer.invoke('state:load'),
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
-  onBeforeQuit: (callback: () => void): void => {
-    ipcRenderer.on('app:before-quit', () => callback());
+  onSaveAndQuit: (callback: () => Promise<void>): void => {
+    ipcRenderer.on('app:save-and-quit', async () => {
+      await callback();
+      ipcRenderer.send('app:quit-ready');
+    });
   },
 });

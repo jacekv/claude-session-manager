@@ -49,6 +49,7 @@ interface ElectronAPI {
   onNewSession(callback: () => void): void;
   onSwitchSession(callback: (id: string) => void): void;
   onNavSession(callback: (direction: 'next' | 'prev') => void): void;
+  onSplitSession(callback: (direction: 'vertical' | 'horizontal') => void): void;
   openUrl(url: string): Promise<void>;
   correctState(id: string, correctState: string): Promise<void>;
   getLogPath(): Promise<string>;
@@ -56,7 +57,7 @@ interface ElectronAPI {
   saveState(state: string): Promise<void>;
   loadState(): Promise<string | null>;
   getPathForFile(file: File): string;
-  onBeforeQuit(callback: () => void): void;
+  onSaveAndQuit(callback: () => Promise<void>): void;
 }
 
 interface Window {
@@ -75,6 +76,7 @@ interface SavedState {
   groups: SessionGroup[];
   sidebarOrder: Array<{ type: 'session'; id: string } | { type: 'group'; id: string }>;
   groupCounter: number;
+  layout?: SerializedLayout;
 }
 
 // TerminalWrapper is declared in terminal.ts and loaded via script tag before app.ts

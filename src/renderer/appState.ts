@@ -58,7 +58,7 @@ function removeSidebarEntry(sessionId: string): void {
 
 // --- State persistence ---
 
-function buildSavedState(): string {
+function buildSavedState(pm: PaneManager): string {
   const savedSessions = Array.from(sessions.entries()).map(([id, s]) => ({
     id, name: s.name, cwd: s.cwd,
   }));
@@ -68,20 +68,22 @@ function buildSavedState(): string {
     groups: savedGroups,
     sidebarOrder,
     groupCounter,
+    layout: pm.serializeLayout(),
   } as SavedState);
 }
 
 let saveTimeout: number | undefined;
+let scheduleSaveImpl: (() => void) | null = null;
+
 function scheduleSave(): void {
-  if (saveTimeout !== undefined) clearTimeout(saveTimeout);
-  saveTimeout = window.setTimeout(() => {
-    if (sessions.size > 0) {
-      window.api.saveState(buildSavedState());
-    }
-  }, 500);
+  scheduleSaveImpl?.();
 }
 
-async function restoreState(): Promise<boolean> {
+function initScheduleSave(impl: () => void): void {
+  scheduleSaveImpl = impl;
+}
+
+async function restoreState(pm: PaneManager): Promise<boolean> {
   const raw = await window.api.loadState();
   if (!raw) return false;
 
@@ -94,14 +96,14 @@ async function restoreState(): Promise<boolean> {
 
   const idMap = new Map<string, string>();
 
-  for (const saved of state.sessions) {
+  await Promise.all(state.sessions.map(async (saved) => {
     const session = await window.api.createSessionAt(saved.cwd, { continue: true }) as SessionInfo | null;
     if (session) {
       session.name = saved.name;
       sessions.set(session.id, session);
       idMap.set(saved.id, session.id);
     }
-  }
+  }));
 
   groupCounter = state.groupCounter;
   for (const savedGroup of state.groups) {
@@ -144,6 +146,10 @@ async function restoreState(): Promise<boolean> {
     if (!inOrder.has(id)) {
       sidebarOrder.push({ type: 'session', id });
     }
+  }
+
+  if (state.layout) {
+    pm.restoreLayout(state.layout, idMap);
   }
 
   return sessions.size > 0;

@@ -1,4 +1,4 @@
-let terminalWrapper: TerminalWrapper;
+let paneManager: PaneManager;
 let activeSessionId: string | null = null;
 const sessions = new Map<string, SessionInfo>();
 
@@ -6,14 +6,39 @@ document.addEventListener('DOMContentLoaded', () => {
   const terminalPanel = document.getElementById('terminal-panel')!;
   const emptyState = document.getElementById('empty-state')!;
 
-  terminalWrapper = new TerminalWrapper(terminalPanel);
-
-  terminalWrapper.onInput((sessionId: string, data: string) => {
-    window.api.sendInput(sessionId, data);
+  paneManager = new PaneManager(terminalPanel, {
+    getBuffer: (sessionId: string) => window.api.getBuffer(sessionId),
+    getSessionName: (sessionId: string) => sessions.get(sessionId)?.name ?? sessionId,
+    onInput: (sessionId: string, data: string) => window.api.sendInput(sessionId, data),
+    onResize: (sessionId: string, cols: number, rows: number) => window.api.resizeSession(sessionId, cols, rows),
+    onFocusChange: (sessionId: string) => {
+      activeSessionId = sessionId;
+      window.api.setActiveSession(sessionId);
+      renderSidebar();
+    },
+    onLayoutEmpty: () => {
+      activeSessionId = null;
+      terminalPanel.classList.remove('visible');
+      emptyState.style.display = '';
+    },
+    onSplitRequest: (paneId: string, direction: SplitDirection) => {
+      splitNewSession(paneId, direction);
+    },
   });
 
-  terminalWrapper.onResize((sessionId: string, cols: number, rows: number) => {
-    window.api.resizeSession(sessionId, cols, rows);
+  initScheduleSave(() => {
+    if (saveTimeout !== undefined) clearTimeout(saveTimeout);
+    saveTimeout = window.setTimeout(async () => {
+      if (sessions.size > 0) {
+        await window.api.saveState(buildSavedState(paneManager));
+      }
+    }, 500);
+  });
+
+  window.api.onSaveAndQuit(async () => {
+    if (sessions.size > 0) {
+      await window.api.saveState(buildSavedState(paneManager));
+    }
   });
 
   async function createNewSession(): Promise<void> {
@@ -28,22 +53,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Attempt to restore previous state on startup
-  restoreState().then((restored) => {
+  restoreState(paneManager).then((restored) => {
     if (restored) {
       renderSidebar();
-      const firstId = getVisibleSessionOrder()[0];
-      if (firstId) switchToSession(firstId);
+      if (!paneManager.isEmpty()) {
+        terminalPanel.classList.add('visible');
+        emptyState.style.display = 'none';
+      } else {
+        const firstId = getVisibleSessionOrder()[0];
+        if (firstId) switchToSession(firstId);
+      }
     }
   });
 
-  // Save state before app quits
-  window.api.onBeforeQuit(() => {
-    if (sessions.size > 0) {
-      window.api.saveState(buildSavedState());
-    }
-  });
-
-  document.getElementById('new-session-btn')!.addEventListener('click', createNewSession);
+document.getElementById('new-session-btn')!.addEventListener('click', createNewSession);
   document.getElementById('rename-session-btn')!.addEventListener('click', () => {
     if (!activeSessionId) return;
     const nameSpan = document.querySelector(`#session-list li.active .session-name`) as HTMLSpanElement | null;
@@ -55,9 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   window.api.onOutput((sessionId: string, data: string) => {
-    if (sessionId === activeSessionId) {
-      terminalWrapper.write(data);
-    }
+    paneManager.routeOutput(sessionId, data);
   });
 
   window.api.onStateChange((sessionId: string, state: SessionStatus) => {
@@ -76,6 +97,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  window.api.onSplitSession((direction: SplitDirection) => {
+    const paneId = paneManager.getFocusedPaneId();
+    if (paneId) splitNewSession(paneId, direction);
+  });
+
   window.api.onNavSession((direction: 'next' | 'prev') => {
     const ids = getVisibleSessionOrder();
     if (ids.length < 2) return;
@@ -87,89 +113,68 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function switchToSession(sessionId: string): void {
-    activeSessionId = sessionId;
-    window.api.setActiveSession(sessionId);
-
     terminalPanel.classList.add('visible');
     emptyState.style.display = 'none';
+    // PaneManager focuses (or opens) the pane and fires onFocusChange, which
+    // updates activeSessionId, the active-session IPC, and the sidebar.
+    paneManager.showSession(sessionId);
+  }
 
-    window.api.getBuffer(sessionId).then((buffer: string) => {
-      terminalWrapper.switchTo(sessionId, buffer);
-
-      const { cols, rows } = terminalWrapper.getDimensions();
-      window.api.resizeSession(sessionId, cols, rows);
-    });
-
+  async function splitNewSession(paneId: string, direction: SplitDirection): Promise<void> {
+    const session = await window.api.createSession();
+    if (!session) return;
+    sessions.set(session.id, session);
+    sidebarOrder.push({ type: 'session', id: session.id });
+    terminalPanel.classList.add('visible');
+    emptyState.style.display = 'none';
+    paneManager.splitPane(paneId, direction, session.id, false);
     renderSidebar();
+    scheduleSave();
+  }
+
+  function startRenameInput(
+    nameSpan: HTMLSpanElement,
+    currentName: string,
+    onCommit: (newName: string) => void,
+  ): void {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'session-rename-input';
+    input.value = currentName;
+
+    const commit = () => {
+      const newName = input.value.trim();
+      if (newName && newName !== currentName) onCommit(newName);
+      renderSidebar();
+    };
+
+    input.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); renderSidebar(); }
+    });
+    input.addEventListener('blur', commit);
+
+    nameSpan.textContent = '';
+    nameSpan.appendChild(input);
+    input.focus();
+    input.select();
   }
 
   function startRename(sessionId: string, nameSpan: HTMLSpanElement): void {
     const session = sessions.get(sessionId);
     if (!session) return;
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'session-rename-input';
-    input.value = session.name;
-
-    const commit = () => {
-      const newName = input.value.trim();
-      if (newName && newName !== session.name) {
-        session.name = newName;
-        scheduleSave();
-      }
-      renderSidebar();
-    };
-
-    input.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commit();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        renderSidebar();
-      }
+    startRenameInput(nameSpan, session.name, (newName) => {
+      session.name = newName;
+      paneManager.updateHeaders();
+      scheduleSave();
     });
-
-    input.addEventListener('blur', commit);
-
-    nameSpan.textContent = '';
-    nameSpan.appendChild(input);
-    input.focus();
-    input.select();
   }
 
   function startGroupRename(group: SessionGroup, nameSpan: HTMLSpanElement): void {
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'session-rename-input';
-    input.value = group.name;
-
-    const commit = () => {
-      const newName = input.value.trim();
-      if (newName && newName !== group.name) {
-        group.name = newName;
-        scheduleSave();
-      }
-      renderSidebar();
-    };
-
-    input.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commit();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        renderSidebar();
-      }
+    startRenameInput(nameSpan, group.name, (newName) => {
+      group.name = newName;
+      scheduleSave();
     });
-
-    input.addEventListener('blur', commit);
-
-    nameSpan.textContent = '';
-    nameSpan.appendChild(input);
-    input.focus();
-    input.select();
   }
 
   function showCorrectionDropdown(dot: HTMLElement, sessionId: string, currentStatus: SessionStatus): void {
@@ -340,10 +345,14 @@ document.addEventListener('DOMContentLoaded', () => {
       removeSidebarEntry(id);
       enforceGroupIntegrity();
 
-      if (activeSessionId === id) {
+      // Remove the killed session from any pane (collapses its split).
+      paneManager.removeSession(id);
+
+      if (paneManager.isEmpty()) {
         activeSessionId = null;
         terminalPanel.classList.remove('visible');
         emptyState.style.display = '';
+        // Open another session in the freed space if any remain.
         const remaining = getVisibleSessionOrder();
         if (remaining.length > 0) switchToSession(remaining[0]);
       }
@@ -355,6 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Drag events
     li.addEventListener('dragstart', (e: DragEvent) => {
       e.dataTransfer!.setData('text/plain', id);
+      e.dataTransfer!.setData('application/x-session-id', id);
       e.dataTransfer!.effectAllowed = 'move';
       dragInProgress = true;
       li.classList.add('dragging');
