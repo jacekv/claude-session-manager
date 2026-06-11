@@ -12,6 +12,9 @@ app.name = 'Claude Session Manager';
 
 let mainWindow: BrowserWindow | null = null;
 let sessionManager: SessionManager | null = null;
+let lastKnownState: string | null = null;
+let statePath = '';
+let userDataPath = '';
 
 function loadWindowState(userDataPath: string): { width: number; height: number; x?: number; y?: number } {
   try {
@@ -33,7 +36,7 @@ function saveWindowState(userDataPath: string, win: BrowserWindow): void {
 }
 
 function createWindow(): void {
-  const userDataPath = app.getPath('userData');
+  userDataPath = app.getPath('userData');
   const winState = loadWindowState(userDataPath);
 
   mainWindow = new BrowserWindow({
@@ -221,9 +224,10 @@ function createWindow(): void {
   });
 
   // State persistence
-  const statePath = path.join(app.getPath('userData'), STATE_FILE);
+  statePath = path.join(userDataPath, STATE_FILE);
 
   ipcMain.handle('state:save', (_event: IpcMainInvokeEvent, state: string) => {
+    lastKnownState = state;
     fs.writeFileSync(statePath, state, 'utf-8');
   });
 
@@ -282,16 +286,16 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
-// SIGINT/SIGTERM (e.g. Ctrl+C in terminal, kill) bypass Electron's quit flow
-// entirely. Route them through the normal window close so the renderer save
-// handshake runs before the process exits.
+// SIGINT/SIGTERM bypass Electron's quit flow — the async renderer save
+// handshake can't run because the event loop may not keep processing IPC.
+// Instead flush the last state the renderer pushed via scheduleSave (at most
+// 500ms stale) and save the window bounds synchronously, then exit.
 function handleSignal() {
-  const win = mainWindow;
-  if (win && !win.isDestroyed()) {
-    win.close(); // triggers win.on('close') → save handshake → win.close() again
-  } else {
-    process.exit(0);
-  }
+  try {
+    if (lastKnownState) fs.writeFileSync(statePath, lastKnownState, 'utf-8');
+    if (mainWindow && !mainWindow.isDestroyed()) saveWindowState(userDataPath, mainWindow);
+  } catch { /* ignore write errors on signal */ }
+  process.exit(0);
 }
 process.on('SIGINT', handleSignal);
 process.on('SIGTERM', handleSignal);
