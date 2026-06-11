@@ -6,16 +6,41 @@ import SessionManager from './src/session-manager';
 import NotificationService from './src/notification';
 
 const STATE_FILE = 'session-state.json';
+const WINDOW_STATE_FILE = 'window-state.json';
 
 app.name = 'Claude Session Manager';
 
 let mainWindow: BrowserWindow | null = null;
 let sessionManager: SessionManager | null = null;
 
+function loadWindowState(userDataPath: string): { width: number; height: number; x?: number; y?: number } {
+  try {
+    const raw = fs.readFileSync(path.join(userDataPath, WINDOW_STATE_FILE), 'utf-8');
+    const s = JSON.parse(raw);
+    if (typeof s.width === 'number' && typeof s.height === 'number') return s;
+  } catch { /* first run or corrupt file */ }
+  return { width: 1200, height: 800 };
+}
+
+function saveWindowState(userDataPath: string, win: BrowserWindow): void {
+  // Use getNormalBounds so we don't save maximised/minimised dimensions.
+  const b = win.getNormalBounds();
+  fs.writeFileSync(
+    path.join(userDataPath, WINDOW_STATE_FILE),
+    JSON.stringify({ width: b.width, height: b.height, x: b.x, y: b.y }),
+    'utf-8',
+  );
+}
+
 function createWindow(): void {
+  const userDataPath = app.getPath('userData');
+  const winState = loadWindowState(userDataPath);
+
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: winState.width,
+    height: winState.height,
+    x: winState.x,
+    y: winState.y,
     minWidth: 800,
     minHeight: 500,
     webPreferences: {
@@ -209,6 +234,7 @@ function createWindow(): void {
   win.on('close', (e) => {
     if (readyToClose) return;
     e.preventDefault();
+    saveWindowState(userDataPath, win);
     win.webContents.send('app:save-and-quit');
   });
 
