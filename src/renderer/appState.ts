@@ -58,7 +58,7 @@ function removeSidebarEntry(sessionId: string): void {
 
 // --- State persistence ---
 
-function buildSavedState(): string {
+function buildSavedState(pm: PaneManager): string {
   const savedSessions = Array.from(sessions.entries()).map(([id, s]) => ({
     id, name: s.name, cwd: s.cwd,
   }));
@@ -68,6 +68,7 @@ function buildSavedState(): string {
     groups: savedGroups,
     sidebarOrder,
     groupCounter,
+    layout: pm.serializeLayout(),
   } as SavedState);
 }
 
@@ -76,12 +77,12 @@ function scheduleSave(): void {
   if (saveTimeout !== undefined) clearTimeout(saveTimeout);
   saveTimeout = window.setTimeout(() => {
     if (sessions.size > 0) {
-      window.api.saveState(buildSavedState());
+      window.api.saveState(buildSavedState(paneManager));
     }
   }, 500);
 }
 
-async function restoreState(): Promise<boolean> {
+async function restoreState(pm: PaneManager): Promise<boolean> {
   const raw = await window.api.loadState();
   if (!raw) return false;
 
@@ -144,6 +145,10 @@ async function restoreState(): Promise<boolean> {
     if (!inOrder.has(id)) {
       sidebarOrder.push({ type: 'session', id });
     }
+  }
+
+  if (state.layout) {
+    pm.restoreLayout(state.layout, idMap);
   }
 
   return sessions.size > 0;

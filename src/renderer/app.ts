@@ -46,18 +46,23 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Attempt to restore previous state on startup
-  restoreState().then((restored) => {
+  restoreState(paneManager).then((restored) => {
     if (restored) {
       renderSidebar();
-      const firstId = getVisibleSessionOrder()[0];
-      if (firstId) switchToSession(firstId);
+      if (!paneManager.isEmpty()) {
+        terminalPanel.classList.add('visible');
+        emptyState.style.display = 'none';
+      } else {
+        const firstId = getVisibleSessionOrder()[0];
+        if (firstId) switchToSession(firstId);
+      }
     }
   });
 
   // Save state before app quits
   window.api.onBeforeQuit(() => {
     if (sessions.size > 0) {
-      window.api.saveState(buildSavedState());
+      window.api.saveState(buildSavedState(paneManager));
     }
   });
 

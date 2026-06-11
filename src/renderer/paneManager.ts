@@ -144,6 +144,47 @@ class PaneManager {
     for (const rec of this.panes.values()) rec.wrapper.fit();
   }
 
+  /** Serialise the current layout tree for persistence. */
+  serializeLayout(): SerializedLayout {
+    return LayoutTree.serialize(this.tree);
+  }
+
+  /**
+   * Restore a previously saved layout. `idMap` maps the old session ids stored
+   * in the tree to the new ids created during session restoration.
+   * Falls back to showing the first session in a single pane if the tree can't
+   * be reconstructed (e.g. all sessions failed to restore).
+   */
+  restoreLayout(saved: SerializedLayout, idMap: Map<string, string>): void {
+    const remapped = this.remapTree(LayoutTree.deserialize(saved), idMap);
+    if (!remapped) return;
+    this.tree = remapped;
+    // Reset counters past the restored ids so new ids don't collide.
+    for (const leaf of LayoutTree.allLeaves(remapped)) {
+      const n = parseInt(leaf.paneId.replace('pane-', ''), 10);
+      if (!isNaN(n) && n >= this.paneCounter) this.paneCounter = n + 1;
+    }
+    this.focusedPaneId = LayoutTree.firstLeaf(remapped).paneId;
+    this.render();
+  }
+
+  /** Recursively rewrite session ids in a deserialized tree using idMap.
+   *  Prunes leaves whose old session id has no mapping (session failed to restore).
+   *  Returns null if the entire subtree is pruned. */
+  private remapTree(node: LayoutNode | null, idMap: Map<string, string>): LayoutNode | null {
+    if (!node) return null;
+    if (node.type === 'leaf') {
+      const newId = idMap.get(node.sessionId);
+      return newId ? { ...node, sessionId: newId } : null;
+    }
+    const a = this.remapTree(node.a, idMap);
+    const b = this.remapTree(node.b, idMap);
+    if (!a && !b) return null;
+    if (!a) return b;
+    if (!b) return a;
+    return { ...node, a, b };
+  }
+
   /** Refresh pane header titles (call after session rename). */
   updateHeaders(): void {
     for (const rec of this.panes.values()) {

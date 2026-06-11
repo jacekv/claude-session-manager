@@ -76,6 +76,7 @@ interface SavedState {
   groups: SessionGroup[];
   sidebarOrder: Array<{ type: 'session'; id: string } | { type: 'group'; id: string }>;
   groupCounter: number;
+  layout?: SerializedLayout;
 }
 
 // TerminalWrapper is declared in terminal.ts and loaded via script tag before app.ts
