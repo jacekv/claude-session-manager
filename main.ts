@@ -202,26 +202,19 @@ function createWindow(): void {
     fs.writeFileSync(statePath, state, 'utf-8');
   });
 
-  // Block quit until the renderer has saved its current state. Pattern:
-  // 1. preventDefault() stops the quit immediately.
-  // 2. We send 'app:save-and-quit' to the renderer.
-  // 3. Renderer saves synchronously via state:save (an invoke — awaitable), then calls app:quit-ready.
-  // 4. We set readyToQuit=true and re-trigger quit, which this time goes through.
-  let readyToQuit = false;
-  app.on('before-quit', (e) => {
-    if (readyToQuit) return;
+  // Intercept window close before the window is destroyed so the renderer can
+  // save current state first. app.on('before-quit') fires too late — the window
+  // is already destroyed by the time it runs when the user clicks the close button.
+  let readyToClose = false;
+  win.on('close', (e) => {
+    if (readyToClose) return;
     e.preventDefault();
-    if (!win.isDestroyed()) {
-      win.webContents.send('app:save-and-quit');
-    } else {
-      readyToQuit = true;
-      app.quit();
-    }
+    win.webContents.send('app:save-and-quit');
   });
 
   ipcMain.on('app:quit-ready', () => {
-    readyToQuit = true;
-    app.quit();
+    readyToClose = true;
+    win.close();
   });
 
   ipcMain.handle('state:load', async () => {
