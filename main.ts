@@ -198,21 +198,30 @@ function createWindow(): void {
   // State persistence
   const statePath = path.join(app.getPath('userData'), STATE_FILE);
 
-  // Keep the last state the renderer pushed in memory. On quit we write it
-  // synchronously, avoiding the async IPC round-trip that races with process exit.
-  let lastSavedState: string | null = null;
-
   ipcMain.handle('state:save', (_event: IpcMainInvokeEvent, state: string) => {
-    lastSavedState = state;
     fs.writeFileSync(statePath, state, 'utf-8');
   });
 
-  app.on('before-quit', () => {
-    // If the renderer's onBeforeQuit save hasn't arrived yet, flush whatever
-    // we last received from scheduleSave to disk right now.
-    if (lastSavedState) {
-      try { fs.writeFileSync(statePath, lastSavedState, 'utf-8'); } catch { /* ignore */ }
+  // Block quit until the renderer has saved its current state. Pattern:
+  // 1. preventDefault() stops the quit immediately.
+  // 2. We send 'app:save-and-quit' to the renderer.
+  // 3. Renderer saves synchronously via state:save (an invoke — awaitable), then calls app:quit-ready.
+  // 4. We set readyToQuit=true and re-trigger quit, which this time goes through.
+  let readyToQuit = false;
+  app.on('before-quit', (e) => {
+    if (readyToQuit) return;
+    e.preventDefault();
+    if (!win.isDestroyed()) {
+      win.webContents.send('app:save-and-quit');
+    } else {
+      readyToQuit = true;
+      app.quit();
     }
+  });
+
+  ipcMain.on('app:quit-ready', () => {
+    readyToQuit = true;
+    app.quit();
   });
 
   ipcMain.handle('state:load', async () => {

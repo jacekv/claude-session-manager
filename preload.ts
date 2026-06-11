@@ -42,7 +42,10 @@ contextBridge.exposeInMainWorld('api', {
   saveState: (state: string): Promise<void> => ipcRenderer.invoke('state:save', state),
   loadState: (): Promise<string | null> => ipcRenderer.invoke('state:load'),
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
-  onBeforeQuit: (callback: () => void): void => {
-    ipcRenderer.on('app:before-quit', () => callback());
+  onSaveAndQuit: (callback: () => Promise<void>): void => {
+    ipcRenderer.on('app:save-and-quit', async () => {
+      await callback();
+      ipcRenderer.send('app:quit-ready');
+    });
   },
 });

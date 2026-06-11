@@ -34,6 +34,12 @@ document.addEventListener('DOMContentLoaded', () => {
     },
   });
 
+  window.api.onSaveAndQuit(async () => {
+    if (sessions.size > 0) {
+      await window.api.saveState(buildSavedState(paneManager));
+    }
+  });
+
   async function createNewSession(): Promise<void> {
     const session = await window.api.createSession();
     if (!session) return;

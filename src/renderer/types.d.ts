@@ -57,7 +57,7 @@ interface ElectronAPI {
   saveState(state: string): Promise<void>;
   loadState(): Promise<string | null>;
   getPathForFile(file: File): string;
-  onBeforeQuit(callback: () => void): void;
+  onSaveAndQuit(callback: () => Promise<void>): void;
 }
 
 interface Window {
