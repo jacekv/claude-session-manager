@@ -73,13 +73,14 @@ function buildSavedState(pm: PaneManager): string {
 }
 
 let saveTimeout: number | undefined;
+let scheduleSaveImpl: (() => void) | null = null;
+
 function scheduleSave(): void {
-  if (saveTimeout !== undefined) clearTimeout(saveTimeout);
-  saveTimeout = window.setTimeout(() => {
-    if (sessions.size > 0) {
-      window.api.saveState(buildSavedState(paneManager));
-    }
-  }, 500);
+  scheduleSaveImpl?.();
+}
+
+function initScheduleSave(impl: () => void): void {
+  scheduleSaveImpl = impl;
 }
 
 async function restoreState(pm: PaneManager): Promise<boolean> {
@@ -95,14 +96,14 @@ async function restoreState(pm: PaneManager): Promise<boolean> {
 
   const idMap = new Map<string, string>();
 
-  for (const saved of state.sessions) {
+  await Promise.all(state.sessions.map(async (saved) => {
     const session = await window.api.createSessionAt(saved.cwd, { continue: true }) as SessionInfo | null;
     if (session) {
       session.name = saved.name;
       sessions.set(session.id, session);
       idMap.set(saved.id, session.id);
     }
-  }
+  }));
 
   groupCounter = state.groupCounter;
   for (const savedGroup of state.groups) {

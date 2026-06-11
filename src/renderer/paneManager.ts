@@ -37,6 +37,8 @@ class PaneManager {
   private callbacks: PaneManagerCallbacks;
   private tree: LayoutNode | null = null;
   private panes = new Map<string, PaneRecord>();
+  /** Reverse index: sessionId → paneIds showing it. Kept in sync with panes map. */
+  private sessionIndex = new Map<string, string[]>();
   private focusedPaneId: string | null = null;
   private paneCounter = 0;
   private splitCounter = 0;
@@ -133,10 +135,8 @@ class PaneManager {
   routeOutput(sessionId: string, data: string): void {
     if (!this.tree) return;
     // Write to every pane showing this session (same session can appear in multiple panes).
-    for (const leaf of LayoutTree.allLeaves(this.tree)) {
-      if (leaf.sessionId === sessionId) {
-        this.panes.get(leaf.paneId)?.wrapper.write(data);
-      }
+    for (const paneId of (this.sessionIndex.get(sessionId) ?? [])) {
+      this.panes.get(paneId)?.wrapper.write(data);
     }
   }
 
@@ -230,6 +230,7 @@ class PaneManager {
         rec.wrapper.dispose();
         rec.element.remove();
         this.panes.delete(paneId);
+        this.removeFromSessionIndex(rec.sessionId, paneId);
       }
     }
 
@@ -288,6 +289,7 @@ class PaneManager {
       existing.wrapper.dispose();
       existing.element.remove();
       this.panes.delete(leaf.paneId);
+      this.removeFromSessionIndex(existing.sessionId, leaf.paneId);
     }
 
     // .terminal-pane
@@ -316,9 +318,33 @@ class PaneManager {
     const closeBtn = header.querySelector('.pane-close') as HTMLButtonElement;
     const rec: PaneRecord = { paneId: leaf.paneId, sessionId: leaf.sessionId, wrapper, element, header, closeBtn };
     this.panes.set(leaf.paneId, rec);
+    this.addToSessionIndex(leaf.sessionId, leaf.paneId);
 
     this.callbacks.getBuffer(leaf.sessionId).then(buf => wrapper.load(buf));
     return rec;
+  }
+
+  private addToSessionIndex(sessionId: string, paneId: string): void {
+    const ids = this.sessionIndex.get(sessionId);
+    if (ids) ids.push(paneId);
+    else this.sessionIndex.set(sessionId, [paneId]);
+  }
+
+  private removeFromSessionIndex(sessionId: string, paneId: string): void {
+    const ids = this.sessionIndex.get(sessionId);
+    if (!ids) return;
+    const next = ids.filter(id => id !== paneId);
+    if (next.length) this.sessionIndex.set(sessionId, next);
+    else this.sessionIndex.delete(sessionId);
+  }
+
+  private makeBtn(extraClass: string, title: string, text: string, handler: () => void): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.className = `pane-btn${extraClass ? ` ${extraClass}` : ''}`;
+    btn.title = title;
+    btn.textContent = text;
+    btn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); handler(); });
+    return btn;
   }
 
   private makeHeader(leaf: LeafNode): HTMLElement {
@@ -330,35 +356,9 @@ class PaneManager {
     title.textContent = this.callbacks.getSessionName(leaf.sessionId);
     header.appendChild(title);
 
-    const splitV = document.createElement('button');
-    splitV.className = 'pane-btn';
-    splitV.title = 'Split right (Cmd+D)';
-    splitV.textContent = '⬝';
-    splitV.addEventListener('click', (e: MouseEvent) => {
-      e.stopPropagation();
-      this.callbacks.onSplitRequest(leaf.paneId, 'vertical');
-    });
-    header.appendChild(splitV);
-
-    const splitH = document.createElement('button');
-    splitH.className = 'pane-btn';
-    splitH.title = 'Split down (Cmd+Shift+D)';
-    splitH.textContent = '⬚';
-    splitH.addEventListener('click', (e: MouseEvent) => {
-      e.stopPropagation();
-      this.callbacks.onSplitRequest(leaf.paneId, 'horizontal');
-    });
-    header.appendChild(splitH);
-
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'pane-btn pane-close';
-    closeBtn.title = 'Close pane';
-    closeBtn.textContent = '×';
-    closeBtn.addEventListener('click', (e: MouseEvent) => {
-      e.stopPropagation();
-      this.closePane(leaf.paneId);
-    });
-    header.appendChild(closeBtn);
+    header.appendChild(this.makeBtn('', 'Split right (Cmd+D)', '⬝', () => this.callbacks.onSplitRequest(leaf.paneId, 'vertical')));
+    header.appendChild(this.makeBtn('', 'Split down (Cmd+Shift+D)', '⬚', () => this.callbacks.onSplitRequest(leaf.paneId, 'horizontal')));
+    header.appendChild(this.makeBtn('pane-close', 'Close pane', '×', () => this.closePane(leaf.paneId)));
 
     return header;
   }
@@ -498,6 +498,7 @@ class PaneManager {
       rec.element.remove();
     }
     this.panes.clear();
+    this.sessionIndex.clear();
     this.focusedPaneId = null;
   }
 

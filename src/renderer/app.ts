@@ -21,17 +21,18 @@ document.addEventListener('DOMContentLoaded', () => {
       terminalPanel.classList.remove('visible');
       emptyState.style.display = '';
     },
-    onSplitRequest: async (paneId: string, direction: SplitDirection) => {
-      const session = await window.api.createSession();
-      if (!session) return;
-      sessions.set(session.id, session);
-      sidebarOrder.push({ type: 'session', id: session.id });
-      terminalPanel.classList.add('visible');
-      emptyState.style.display = 'none';
-      paneManager.splitPane(paneId, direction, session.id, false);
-      renderSidebar();
-      scheduleSave();
+    onSplitRequest: (paneId: string, direction: SplitDirection) => {
+      splitNewSession(paneId, direction);
     },
+  });
+
+  initScheduleSave(() => {
+    if (saveTimeout !== undefined) clearTimeout(saveTimeout);
+    saveTimeout = window.setTimeout(async () => {
+      if (sessions.size > 0) {
+        await window.api.saveState(buildSavedState(paneManager));
+      }
+    }, 500);
   });
 
   window.api.onSaveAndQuit(async () => {
@@ -97,21 +98,8 @@ document.getElementById('new-session-btn')!.addEventListener('click', createNewS
   });
 
   window.api.onSplitSession((direction: SplitDirection) => {
-    const focusedId = paneManager.getFocusedSessionId();
-    if (!focusedId) return;
     const paneId = paneManager.getFocusedPaneId();
-    if (!paneId) return;
-    (async () => {
-      const session = await window.api.createSession();
-      if (!session) return;
-      sessions.set(session.id, session);
-      sidebarOrder.push({ type: 'session', id: session.id });
-      terminalPanel.classList.add('visible');
-      emptyState.style.display = 'none';
-      paneManager.splitPane(paneId, direction, session.id, false);
-      renderSidebar();
-      scheduleSave();
-    })();
+    if (paneId) splitNewSession(paneId, direction);
   });
 
   window.api.onNavSession((direction: 'next' | 'prev') => {
@@ -132,34 +120,38 @@ document.getElementById('new-session-btn')!.addEventListener('click', createNewS
     paneManager.showSession(sessionId);
   }
 
-  function startRename(sessionId: string, nameSpan: HTMLSpanElement): void {
-    const session = sessions.get(sessionId);
+  async function splitNewSession(paneId: string, direction: SplitDirection): Promise<void> {
+    const session = await window.api.createSession();
     if (!session) return;
+    sessions.set(session.id, session);
+    sidebarOrder.push({ type: 'session', id: session.id });
+    terminalPanel.classList.add('visible');
+    emptyState.style.display = 'none';
+    paneManager.splitPane(paneId, direction, session.id, false);
+    renderSidebar();
+    scheduleSave();
+  }
 
+  function startRenameInput(
+    nameSpan: HTMLSpanElement,
+    currentName: string,
+    onCommit: (newName: string) => void,
+  ): void {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'session-rename-input';
-    input.value = session.name;
+    input.value = currentName;
 
     const commit = () => {
       const newName = input.value.trim();
-      if (newName && newName !== session.name) {
-        session.name = newName;
-        scheduleSave();
-      }
+      if (newName && newName !== currentName) onCommit(newName);
       renderSidebar();
     };
 
     input.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commit();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        renderSidebar();
-      }
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); renderSidebar(); }
     });
-
     input.addEventListener('blur', commit);
 
     nameSpan.textContent = '';
@@ -168,37 +160,21 @@ document.getElementById('new-session-btn')!.addEventListener('click', createNewS
     input.select();
   }
 
-  function startGroupRename(group: SessionGroup, nameSpan: HTMLSpanElement): void {
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'session-rename-input';
-    input.value = group.name;
-
-    const commit = () => {
-      const newName = input.value.trim();
-      if (newName && newName !== group.name) {
-        group.name = newName;
-        scheduleSave();
-      }
-      renderSidebar();
-    };
-
-    input.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commit();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        renderSidebar();
-      }
+  function startRename(sessionId: string, nameSpan: HTMLSpanElement): void {
+    const session = sessions.get(sessionId);
+    if (!session) return;
+    startRenameInput(nameSpan, session.name, (newName) => {
+      session.name = newName;
+      paneManager.updateHeaders();
+      scheduleSave();
     });
+  }
 
-    input.addEventListener('blur', commit);
-
-    nameSpan.textContent = '';
-    nameSpan.appendChild(input);
-    input.focus();
-    input.select();
+  function startGroupRename(group: SessionGroup, nameSpan: HTMLSpanElement): void {
+    startRenameInput(nameSpan, group.name, (newName) => {
+      group.name = newName;
+      scheduleSave();
+    });
   }
 
   function showCorrectionDropdown(dot: HTMLElement, sessionId: string, currentStatus: SessionStatus): void {
