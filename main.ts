@@ -6,16 +6,44 @@ import SessionManager from './src/session-manager';
 import NotificationService from './src/notification';
 
 const STATE_FILE = 'session-state.json';
+const WINDOW_STATE_FILE = 'window-state.json';
 
 app.name = 'Claude Session Manager';
 
 let mainWindow: BrowserWindow | null = null;
 let sessionManager: SessionManager | null = null;
+let lastKnownState: string | null = null;
+let statePath = '';
+let userDataPath = '';
+
+function loadWindowState(userDataPath: string): { width: number; height: number; x?: number; y?: number } {
+  try {
+    const raw = fs.readFileSync(path.join(userDataPath, WINDOW_STATE_FILE), 'utf-8');
+    const s = JSON.parse(raw);
+    if (typeof s.width === 'number' && typeof s.height === 'number') return s;
+  } catch { /* first run or corrupt file */ }
+  return { width: 1200, height: 800 };
+}
+
+function saveWindowState(userDataPath: string, win: BrowserWindow): void {
+  // Use getNormalBounds so we don't save maximised/minimised dimensions.
+  const b = win.getNormalBounds();
+  fs.writeFileSync(
+    path.join(userDataPath, WINDOW_STATE_FILE),
+    JSON.stringify({ width: b.width, height: b.height, x: b.x, y: b.y }),
+    'utf-8',
+  );
+}
 
 function createWindow(): void {
+  userDataPath = app.getPath('userData');
+  const winState = loadWindowState(userDataPath);
+
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: winState.width,
+    height: winState.height,
+    x: winState.x,
+    y: winState.y,
     minWidth: 800,
     minHeight: 500,
     webPreferences: {
@@ -110,6 +138,12 @@ function createWindow(): void {
     if (navModifier && (input.key === 'ArrowUp' || input.key === 'ArrowDown')) {
       win.webContents.send('nav-session', input.key === 'ArrowDown' ? 'next' : 'prev');
     }
+
+    // Cmd+D: split right. Cmd+Shift+D: split down.
+    if ((input.meta || input.control) && input.key === 'd') {
+      const direction = input.shift ? 'horizontal' : 'vertical';
+      win.webContents.send('split-session', direction);
+    }
   });
 
   ipcMain.handle('session:create', async () => {
@@ -190,10 +224,27 @@ function createWindow(): void {
   });
 
   // State persistence
-  const statePath = path.join(app.getPath('userData'), STATE_FILE);
+  statePath = path.join(userDataPath, STATE_FILE);
 
   ipcMain.handle('state:save', (_event: IpcMainInvokeEvent, state: string) => {
+    lastKnownState = state;
     fs.writeFileSync(statePath, state, 'utf-8');
+  });
+
+  // Intercept window close before the window is destroyed so the renderer can
+  // save current state first. app.on('before-quit') fires too late — the window
+  // is already destroyed by the time it runs when the user clicks the close button.
+  let readyToClose = false;
+  win.on('close', (e) => {
+    if (readyToClose) return;
+    e.preventDefault();
+    saveWindowState(userDataPath, win);
+    win.webContents.send('app:save-and-quit');
+  });
+
+  ipcMain.on('app:quit-ready', () => {
+    readyToClose = true;
+    win.close();
   });
 
   ipcMain.handle('state:load', async () => {
@@ -229,13 +280,22 @@ app.whenReady().then(() => {
   createWindow();
 });
 
-app.on('before-quit', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('app:before-quit');
-  }
-});
 
 app.on('window-all-closed', () => {
   if (sessionManager) sessionManager.killAll();
   app.quit();
 });
+
+// SIGINT/SIGTERM bypass Electron's quit flow — the async renderer save
+// handshake can't run because the event loop may not keep processing IPC.
+// Instead flush the last state the renderer pushed via scheduleSave (at most
+// 500ms stale) and save the window bounds synchronously, then exit.
+function handleSignal() {
+  try {
+    if (lastKnownState) fs.writeFileSync(statePath, lastKnownState, 'utf-8');
+    if (mainWindow && !mainWindow.isDestroyed()) saveWindowState(userDataPath, mainWindow);
+  } catch { /* ignore write errors on signal */ }
+  process.exit(0);
+}
+process.on('SIGINT', handleSignal);
+process.on('SIGTERM', handleSignal);
