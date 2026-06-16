@@ -40,6 +40,7 @@ interface ElectronAPI {
   killSession(id: string): Promise<void>;
   listSessions(): Promise<SessionInfo[]>;
   getBuffer(id: string): Promise<string>;
+  getCostTotal(): Promise<{ total: number; month: number }>;
   setActiveSession(id: string): void;
   sendInput(id: string, data: string): void;
   resizeSession(id: string, cols: number, rows: number): void;
@@ -50,6 +51,7 @@ interface ElectronAPI {
   onSwitchSession(callback: (id: string) => void): void;
   onNavSession(callback: (direction: 'next' | 'prev') => void): void;
   onSplitSession(callback: (direction: 'vertical' | 'horizontal') => void): void;
+  onCostUpdate(callback: (cost: { total: number; month: number }) => void): void;
   openUrl(url: string): Promise<void>;
   correctState(id: string, correctState: string): Promise<void>;
   getLogPath(): Promise<string>;

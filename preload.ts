@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('api', {
   killSession: (id: string): Promise<void> => ipcRenderer.invoke('session:kill', id),
   listSessions: (): Promise<unknown[]> => ipcRenderer.invoke('session:list'),
   getBuffer: (id: string): Promise<string> => ipcRenderer.invoke('session:buffer', id),
+  getCostTotal: (): Promise<{ total: number; month: number }> => ipcRenderer.invoke('cost:total'),
 
   setActiveSession: (id: string): void => ipcRenderer.send('session:active', id),
   sendInput: (id: string, data: string): void => ipcRenderer.send('session:input', id, data),
@@ -31,6 +32,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   onSplitSession: (callback: (direction: 'vertical' | 'horizontal') => void): void => {
     ipcRenderer.on('split-session', (_, direction) => callback(direction));
+  },
+  onCostUpdate: (callback: (cost: { total: number; month: number }) => void): void => {
+    ipcRenderer.on('cost:update', (_, cost) => callback(cost));
   },
 
   openUrl: (url: string): Promise<void> => ipcRenderer.invoke('open-url', url),

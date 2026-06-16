@@ -143,6 +143,10 @@ class SessionManager extends EventEmitter {
     return Array.from(this.sessions.values());
   }
 
+  getPids(): number[] {
+    return Array.from(this.sessions.values()).map(s => s.ptyProcess.pid);
+  }
+
   correctState(id: string, correctState: SessionState): void {
     const session = this.sessions.get(id);
     if (!session) return;

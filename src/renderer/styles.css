@@ -29,12 +29,16 @@ html, body {
 }
 
 #app {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-rows: 1fr auto;
   height: 100%;
 }
 
 /* Sidebar */
 #sidebar {
+  grid-column: 1;
+  grid-row: 1 / 3;
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
   background: var(--bg-sidebar);
@@ -194,9 +198,39 @@ html, body {
 
 /* Terminal panel */
 #terminal-container {
-  flex: 1;
+  grid-column: 2;
+  grid-row: 1;
   position: relative;
   overflow: hidden;
+}
+
+/* Bottom status bar — spans the terminal column; sidebar stays full height. */
+#status-bar {
+  grid-column: 2;
+  grid-row: 2;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  padding: 4px 12px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#status-bar .status-label {
+  opacity: 0.75;
+  cursor: help;
+}
+
+#status-bar .status-cost {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+#status-bar .status-sep {
+  opacity: 0.4;
+  margin: 0 2px;
 }
 
 #terminal-panel {

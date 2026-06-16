@@ -26,6 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
     },
   });
 
+  initStatusBar();
+
   initScheduleSave(() => {
     if (saveTimeout !== undefined) clearTimeout(saveTimeout);
     saveTimeout = window.setTimeout(async () => {

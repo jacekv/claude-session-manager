@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import SessionManager from './src/session-manager';
 import NotificationService from './src/notification';
+import CostTracker from './src/cost-tracker';
 
 const STATE_FILE = 'session-state.json';
 const WINDOW_STATE_FILE = 'window-state.json';
@@ -110,6 +111,7 @@ function createWindow(): void {
 
   sessionManager = new SessionManager(app.getPath('userData'));
   const notificationService = new NotificationService(sessionManager, win);
+  const costTracker = new CostTracker();
 
   sessionManager.on('output', (sessionId: string, data: string) => {
     if (!win.isDestroyed()) win.webContents.send('session:output', sessionId, data);
@@ -201,6 +203,32 @@ function createWindow(): void {
   ipcMain.handle('session:buffer', (_event: IpcMainInvokeEvent, sessionId: string) => {
     return sessionManager!.getBuffer(sessionId);
   });
+
+  // API-equivalent usage cost across all open sessions, computed from the CLI's
+  // transcript token counts × published prices (see src/cost-tracker.ts).
+  ipcMain.handle('cost:total', () => ({
+    ...costTracker.totalCost(sessionManager!.getPids()),
+    month: costTracker.monthlyCost(),
+  }));
+
+  // Push cost updates to the renderer. Open-session total polls at 5s (transcripts
+  // are appended continuously during a turn); monthly re-scans all history so it
+  // uses a 60s interval and is cached inside monthlyCost() too.
+  let lastMonth = costTracker.monthlyCost();
+  const pushCost = () => {
+    if (win.isDestroyed()) return;
+    win.webContents.send('cost:update', {
+      ...costTracker.totalCost(sessionManager!.getPids()),
+      month: lastMonth,
+    });
+  };
+  const sessionInterval = setInterval(pushCost, 5000);
+  const monthInterval = setInterval(() => {
+    if (win.isDestroyed()) return;
+    lastMonth = costTracker.monthlyCost();
+  }, 60_000);
+  win.on('closed', () => { clearInterval(sessionInterval); clearInterval(monthInterval); });
+  win.webContents.once('did-finish-load', pushCost);
 
   ipcMain.handle('open-url', (_event: IpcMainInvokeEvent, url: string) => {
     if (url.startsWith('https://') || url.startsWith('http://')) {
